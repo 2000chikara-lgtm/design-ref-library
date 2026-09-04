@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImage, guessExt } from "@/lib/image";
 import type { Folder } from "@/lib/types";
+import CropModal from "./CropModal";
 
 type PendingItem = {
   id: string;
@@ -28,6 +29,7 @@ export default function UploadSheet({ folders, initialFiles, onClose, onUploaded
   const [urlBusy, setUrlBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cropId, setCropId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -71,6 +73,18 @@ export default function UploadSheet({ folders, initialFiles, onClose, onUploaded
 
   function setItemFolder(id: string, folderId: string) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, folderId } : i)));
+  }
+
+  function applyCrop(id: string, blob: Blob) {
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.id !== id) return i;
+        URL.revokeObjectURL(i.previewUrl);
+        const croppedFile = new File([blob], i.file.name, { type: "image/jpeg" });
+        return { ...i, file: croppedFile, previewUrl: URL.createObjectURL(croppedFile) };
+      })
+    );
+    setCropId(null);
   }
 
   async function uploadOne(item: PendingItem) {
@@ -231,12 +245,20 @@ export default function UploadSheet({ folders, initialFiles, onClose, onUploaded
                       ))}
                     </select>
                   </div>
-                  <span className="w-14 flex-shrink-0 text-center text-[11px] text-faint">
+                  <span className="w-12 flex-shrink-0 text-center text-[11px] text-faint">
                     {item.status === "pending" && "待機中"}
                     {item.status === "uploading" && "保存中…"}
                     {item.status === "done" && "✓ 完了"}
                     {item.status === "error" && "✕ 失敗"}
                   </span>
+                  {item.status === "pending" && (
+                    <button
+                      onClick={() => setCropId(item.id)}
+                      className="flex-shrink-0 text-xs text-accent hover:underline"
+                    >
+                      トリミング
+                    </button>
+                  )}
                   <button
                     onClick={() => removeItem(item.id)}
                     className="flex-shrink-0 text-faint hover:text-ink"
@@ -259,6 +281,19 @@ export default function UploadSheet({ folders, initialFiles, onClose, onUploaded
           </button>
         </div>
       </div>
+
+      {cropId &&
+        (() => {
+          const target = items.find((i) => i.id === cropId);
+          if (!target) return null;
+          return (
+            <CropModal
+              imageSrc={target.previewUrl}
+              onCancel={() => setCropId(null)}
+              onApply={(blob) => applyCrop(cropId, blob)}
+            />
+          );
+        })()}
     </div>
   );
 }

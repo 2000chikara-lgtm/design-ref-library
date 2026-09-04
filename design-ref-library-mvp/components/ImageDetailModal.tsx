@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { signOriginal } from "@/lib/data";
+import { prepareImage } from "@/lib/image";
 import type { UIImage } from "@/lib/data";
 import type { Folder, Tag } from "@/lib/types";
+import CropModal from "./CropModal";
 
 type Props = {
   image: UIImage;
@@ -30,6 +32,7 @@ export default function ImageDetailModal({
   const [memo, setMemo] = useState(image.memo ?? "");
   const [tagInput, setTagInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cropping, setCropping] = useState(false);
 
   useEffect(() => {
     setMemo(image.memo ?? "");
@@ -100,6 +103,49 @@ export default function ImageDetailModal({
     await supabase.from("image_tags").delete().eq("image_id", image.id).eq("tag_id", tagId);
     setBusy(false);
     onChanged();
+  }
+
+  async function applyCrop(blob: Blob) {
+    setBusy(true);
+    try {
+      const prepared = await prepareImage(blob);
+      const suffix = crypto.randomUUID();
+      const newOriginalPath = `${image.user_id}/${image.id}/original-${suffix}.jpg`;
+      const newThumbPath = `${image.user_id}/${image.id}/thumb-${suffix}.webp`;
+
+      const up1 = await supabase.storage
+        .from("images")
+        .upload(newOriginalPath, prepared.original, { contentType: "image/jpeg" });
+      if (up1.error) throw up1.error;
+
+      const up2 = await supabase.storage
+        .from("images")
+        .upload(newThumbPath, prepared.thumb, { contentType: "image/webp" });
+      if (up2.error) throw up2.error;
+
+      const { error: updateError } = await supabase
+        .from("images")
+        .update({
+          storage_path: newOriginalPath,
+          thumb_path: newThumbPath,
+          width: prepared.width,
+          height: prepared.height,
+        })
+        .eq("id", image.id);
+      if (updateError) throw updateError;
+
+      await supabase.storage.from("images").remove([image.storage_path, image.thumb_path]);
+
+      const newUrl = await signOriginal(supabase, newOriginalPath);
+      setOriginalUrl(newUrl);
+      setCropping(false);
+      onChanged();
+    } catch (e) {
+      console.error(e);
+      alert("トリミングの保存に失敗しました");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteImage() {
@@ -238,27 +284,44 @@ export default function ImageDetailModal({
             </a>
           )}
 
-          <div className="mt-auto flex gap-2 border-t border-line pt-4">
-            {originalUrl && (
-              <a
-                href={originalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 rounded-lg border border-line px-3 py-2 text-center text-sm font-medium hover:bg-surface-muted"
+          <div className="mt-auto flex flex-col gap-2 border-t border-line pt-4">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCropping(true)}
+                disabled={busy || !originalUrl}
+                className="flex-1 rounded-lg border border-line px-3 py-2 text-sm font-medium hover:bg-surface-muted disabled:opacity-40"
               >
-                元画像を表示
-              </a>
-            )}
+                トリミング
+              </button>
+              {originalUrl && (
+                <a
+                  href={originalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 rounded-lg border border-line px-3 py-2 text-center text-sm font-medium hover:bg-surface-muted"
+                >
+                  元画像を表示
+                </a>
+              )}
+            </div>
             <button
               onClick={deleteImage}
               disabled={busy}
-              className="flex-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
             >
               削除
             </button>
           </div>
         </div>
       </div>
+
+      {cropping && originalUrl && (
+        <CropModal
+          imageSrc={originalUrl}
+          onCancel={() => setCropping(false)}
+          onApply={applyCrop}
+        />
+      )}
     </div>
   );
 }
