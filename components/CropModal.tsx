@@ -28,7 +28,12 @@ export default function CropModal({ imageSrc, onCancel, onApply }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-black/90">
+    <div
+      className="fixed inset-0 z-[60] flex flex-col bg-black/90"
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
       <div className="flex items-center justify-between px-4 py-3">
         <button onClick={onCancel} className="text-sm text-white/80 hover:text-white">
           キャンセル
